@@ -1,0 +1,51 @@
+version: "3.3"
+services:
+
+    dev:
+        build: app/ted-search2
+        command: sleep inf
+        volumes:
+            #- "app_volume:/root/.m2/" #getting access to artifactory
+            - "./app:/app"
+            - "ssh-dev:/root/.ssh/"
+        networks: 
+            - dev-env
+
+    jenkins:
+        build: jenkins
+        hostname: "jenkins-2"
+        container_name: "jenkins-2"
+        ports:
+            - "8080:8080"
+        volumes:
+            - "jenkins_home:/var/jenkins_home"
+            - "/var/run/docker.sock:/var/run/docker.sock"
+        networks: 
+            - build-env
+     
+    gitlab:
+        image: gitlab/gitlab-ce:13.12.4-ce.0
+        hostname: "gitlab-2"
+        container_name: "gitlab-2"
+        ports:
+            - "80:80"
+        volumes:
+            - "gl-conf:/etc/gitlab"
+            - "gl-logs:/var/log/gitlab"
+            - "gl-data:/var/opt/gitlab"
+        networks: 
+            - dev-env
+            - build-env
+    
+volumes: 
+    app_volume:
+    app:
+    ssh-dev:
+    jenkins_home:
+    gl-conf:
+    gl-logs:
+    gl-data:
+
+networks: 
+    build-env:
+    dev-env:

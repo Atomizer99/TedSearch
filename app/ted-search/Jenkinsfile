@@ -1,0 +1,112 @@
+pipeline {
+
+    agent any
+
+    tools{
+        terraform "terraform11"
+    }
+
+
+    environment {
+        registry="305738231455.dkr.ecr.eu-central-1.amazonaws.com/ted-search"
+        credentials="ecr:eu-central-1:aws-jenkins" 
+        my_email="eli.kaplan70@gmail.com"
+        image_name="ted-search"
+        cont_name="ted-cont"
+        network_name="ted-search_build-env"
+        out_port="8085"
+        in_port="8084"
+        version="latest"
+        commit = sh(script: 'git log -1 --pretty=%B ${GIT_COMMIT}', returnStdout: true).trim()
+    }
+
+
+    stages {
+        stage ('Build') {
+            steps {
+
+                sh "echo ==========================================="
+                sh "echo ================== BUILD =================="
+                sh "echo ==========================================="
+
+                withMaven(
+                    maven: 'maven:3.6.2',
+                    mavenLocalRepo: '.repository' 
+                )
+                {
+                    sh "mvn clean verify"
+                    sh "echo ================== checking 1 =================="
+                    sh "echo ==========================================="
+                    sh "docker images"
+                }
+            }
+        }
+
+        stage('Publish') {
+            steps {
+                script {
+                    if(commit.contains('#test')) {
+                        sh "echo ==========================================="
+                        sh "echo ================= PUBLISH ================="
+                        sh "echo ==========================================="
+                        // docker.withRegistry("https://" + registry , credentials) { docker.image("$image_name").push("$version") }
+                        
+                        sh(script:'docker tag 305738231455.dkr.ecr.eu-central-1.amazonaws.com/ted-search:latest ted-search:latest')
+                        sh(script:'docker login -u AWS -p $(aws ecr get-login-password --region eu-central-1) 305738231455.dkr.ecr.eu-central-1.amazonaws.com')
+                        sh(script:'docker push 305738231455.dkr.ecr.eu-central-1.amazonaws.com/ted-search:latest')
+                    }
+                }
+            }
+        }
+
+        stage('Provision test environment') {
+            
+            steps {
+                script{
+                    if(commit.contains('#test')) {
+                        sh "echo ============================================="
+                        sh "echo ====== Provisioning test environment ========"
+                        sh "echo ============================================="
+                        sh "terraform init"
+                        sh "terraform workspace new tedsearch-${BUILD_NUMBER}"
+                        sh "terraform apply --auto-approve"  
+                    }
+                }
+            }
+        }
+
+        stage ('E2E TEST') {
+            steps {
+                script{
+                    if(commit.contains('#test')) {
+                        sh '''
+                            echo =============================================
+                            echo ================= E2E TEST ==================
+                            echo =============================================
+                            
+
+                            terraform workspace select tedsearch-${BUILD_NUMBER}
+                            terraform output  #for debugging
+                            export APP_IP="$(terraform output | cut -d '=' -f 2 | sed 's/ //g')"
+                            sed -i 's/localhost/'"$APP_IP"'/g' e2e.sh
+                            chmod 777 e2e.sh
+                            ./e2e.sh
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "taking down the terraform"
+                script: '''
+                    terraform workspace select tedsearch-${BUILD_NUMBER}
+                    terraform destroy --auto-approve || true
+                '''
+            }
+        }
+    }
+}
